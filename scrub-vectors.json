@@ -298,6 +298,50 @@
           }
         ]
       }
+    },
+    {
+      "name": "Django-style request path with a card number segment is scrubbed (REA-184 Django middleware)",
+      "event": {
+        "message": "boom",
+        "request": { "method": "GET", "path": "/orders/4111111111111111/receipt", "status": 500 }
+      },
+      "expected": {
+        "message": "boom",
+        "request": { "method": "GET", "path": "/orders/[scrubbed]/receipt", "status": 500 }
+      }
+    },
+    {
+      "name": "FastAPI/Starlette route-template path carrying a prefixed key param is scrubbed (REA-184 FastAPI middleware)",
+      "event": {
+        "message": "webhook delivery failed",
+        "request": { "method": "POST", "path": "/webhooks/sk_live_abcdefgh12345678/deliver", "status": 500 }
+      },
+      "expected": {
+        "message": "webhook delivery failed",
+        "request": { "method": "POST", "path": "/webhooks/[scrubbed]/deliver", "status": 500 }
+      }
+    },
+    {
+      "name": "Celery task-failure message embedding a card number is scrubbed (REA-184 Celery signal hook)",
+      "event": {
+        "message": "charge 4242424242424242 failed in task process_payment",
+        "fingerprint": ["celery", "app.tasks.process_payment", "ValueError"]
+      },
+      "expected": {
+        "message": "charge [scrubbed] failed in task process_payment",
+        "fingerprint": ["celery", "app.tasks.process_payment", "ValueError"]
+      }
+    },
+    {
+      "name": "Express default capture has no headers at all; a benign path with a short digit run stays untouched (REA-184 Express middleware)",
+      "event": {
+        "message": "checkout failed",
+        "request": { "method": "POST", "path": "/checkout/session/8842", "status": 500 }
+      },
+      "expected": {
+        "message": "checkout failed",
+        "request": { "method": "POST", "path": "/checkout/session/8842", "status": 500 }
+      }
     }
   ]
 }
