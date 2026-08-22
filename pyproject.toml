@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "realuptime-errors"
+version = "0.2.0"
+description = "Zero-dependency error tracking SDK for Python (WSGI/ASGI), part of RealUptime Errors."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "RealUptime", email = "support@realuptime.io" }]
+
+[project.urls]
+Homepage = "https://realuptime.io/error-tracking"
+Repository = "https://github.com/RealUptimeHQ/realuptime-errors-py"
+Issues = "https://github.com/RealUptimeHQ/realuptime-errors-py/issues"
+
+[tool.setuptools]
+py-modules = ["realuptime_errors"]

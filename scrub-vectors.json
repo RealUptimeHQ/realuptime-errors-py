@@ -1,0 +1,303 @@
+{
+  "comment": "Shared PII-scrub test vectors for the Errors SDKs and the server-side second net (docs/errors-plan.md, 'The SDKs: two languages, one contract'). Consumed by packages/errors-js/scrub.test.ts, packages/errors-py/tests/test_scrub.py, and packages/db/error-scrub.test.ts. All three implementations must produce byte-identical output for every vector; a semantic change here is a wire-contract change and needs all three updated in one PR. The server's second net applies the PATTERN rules only: header removal and allowFields are client-side duties (a header that reaches the server was either never in the removal set or was deliberately opted back in, and the server cannot tell which). Vectors where the server's output therefore differs carry expectedServer; absent it, the server expects `expected`.",
+  "version": 1,
+  "vectors": [
+    {
+      "name": "card number, plain, Luhn-valid",
+      "event": { "message": "Payment failed for 4242424242424242" },
+      "expected": { "message": "Payment failed for [scrubbed]" }
+    },
+    {
+      "name": "card number with separators, Luhn-valid",
+      "event": { "message": "card 4111 1111 1111 1111 declined" },
+      "expected": { "message": "card [scrubbed] declined" }
+    },
+    {
+      "name": "16 digits failing Luhn stay (an order id is not a card)",
+      "event": { "message": "order 4242424242424241 not found" },
+      "expected": { "message": "order 4242424242424241 not found" }
+    },
+    {
+      "name": "short digit runs stay",
+      "event": { "message": "HTTP 502 after 12345 ms" },
+      "expected": { "message": "HTTP 502 after 12345 ms" }
+    },
+    {
+      "name": "amex-length card, Luhn-valid",
+      "event": { "message": "378282246310005 charged twice" },
+      "expected": { "message": "[scrubbed] charged twice" }
+    },
+    {
+      "name": "JWT three-dot shape",
+      "event": { "message": "token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJVadQssw5c expired" },
+      "expected": { "message": "token [scrubbed] expired" }
+    },
+    {
+      "name": "prefixed secret key (sk_)",
+      "event": { "message": "sk_live_abcdef1234567890 rejected" },
+      "expected": { "message": "[scrubbed] rejected" }
+    },
+    {
+      "name": "prefixed token (ghp_)",
+      "event": { "message": "push denied for ghp_AbCdEf1234567890abcdef" },
+      "expected": { "message": "push denied for [scrubbed]" }
+    },
+    {
+      "name": "realuptime agent token (rua_)",
+      "event": { "message": "agent auth failed: rua_0123456789abcdef0123456789abcdef" },
+      "expected": { "message": "agent auth failed: [scrubbed]" }
+    },
+    {
+      "name": "long hex run (32+)",
+      "event": { "message": "session deadbeefdeadbeefdeadbeefdeadbeef invalid" },
+      "expected": { "message": "session [scrubbed] invalid" }
+    },
+    {
+      "name": "short hex run stays (16)",
+      "event": { "message": "trace deadbeefdeadbeef sampled" },
+      "expected": { "message": "trace deadbeefdeadbeef sampled" }
+    },
+    {
+      "name": "long base64-ish run (40+)",
+      "event": { "message": "blob QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVphYmNkZWZnaGlq= rejected" },
+      "expected": { "message": "blob [scrubbed] rejected" }
+    },
+    {
+      "name": "authorization header removed, benign header kept",
+      "event": {
+        "message": "request failed",
+        "request": {
+          "method": "GET",
+          "path": "/orders",
+          "status": 500,
+          "headers": { "authorization": "Bearer some-session-value", "x-request-id": "req-42" }
+        }
+      },
+      "expected": {
+        "message": "request failed",
+        "request": {
+          "method": "GET",
+          "path": "/orders",
+          "status": 500,
+          "headers": { "authorization": "[scrubbed]", "x-request-id": "req-42" }
+        }
+      },
+      "expectedServer": {
+        "message": "request failed",
+        "request": {
+          "method": "GET",
+          "path": "/orders",
+          "status": 500,
+          "headers": { "authorization": "Bearer some-session-value", "x-request-id": "req-42" }
+        }
+      }
+    },
+    {
+      "name": "cookie and set-cookie removed, any casing",
+      "event": {
+        "message": "boom",
+        "request": {
+          "method": "POST",
+          "path": "/login",
+          "status": 500,
+          "headers": { "Cookie": "sid=abc", "Set-Cookie": "sid=def", "Proxy-Authorization": "Basic xyz" }
+        }
+      },
+      "expected": {
+        "message": "boom",
+        "request": {
+          "method": "POST",
+          "path": "/login",
+          "status": 500,
+          "headers": { "Cookie": "[scrubbed]", "Set-Cookie": "[scrubbed]", "Proxy-Authorization": "[scrubbed]" }
+        }
+      },
+      "expectedServer": {
+        "message": "boom",
+        "request": {
+          "method": "POST",
+          "path": "/login",
+          "status": 500,
+          "headers": { "Cookie": "sid=abc", "Set-Cookie": "sid=def", "Proxy-Authorization": "Basic xyz" }
+        }
+      }
+    },
+    {
+      "name": "kept header values still pass the pattern scrub",
+      "event": {
+        "message": "boom",
+        "request": {
+          "method": "GET",
+          "path": "/v1/charge",
+          "status": 500,
+          "headers": { "x-api-key": "sk_test_abcdefgh12345678" }
+        }
+      },
+      "expected": {
+        "message": "boom",
+        "request": {
+          "method": "GET",
+          "path": "/v1/charge",
+          "status": 500,
+          "headers": { "x-api-key": "[scrubbed]" }
+        }
+      }
+    },
+    {
+      "name": "allowFields opts one header back in, by lowercased name",
+      "allowFields": ["authorization"],
+      "event": {
+        "message": "boom",
+        "request": {
+          "method": "GET",
+          "path": "/me",
+          "status": 401,
+          "headers": { "Authorization": "Digest username=alice" }
+        }
+      },
+      "expected": {
+        "message": "boom",
+        "request": {
+          "method": "GET",
+          "path": "/me",
+          "status": 401,
+          "headers": { "Authorization": "Digest username=alice" }
+        }
+      }
+    },
+    {
+      "name": "allowFields never disables the pattern scrub on the kept value",
+      "allowFields": ["authorization"],
+      "event": {
+        "message": "boom",
+        "request": {
+          "method": "GET",
+          "path": "/me",
+          "status": 401,
+          "headers": { "authorization": "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJVadQssw5c" }
+        }
+      },
+      "expected": {
+        "message": "boom",
+        "request": {
+          "method": "GET",
+          "path": "/me",
+          "status": 401,
+          "headers": { "authorization": "Bearer [scrubbed]" }
+        }
+      }
+    },
+    {
+      "name": "token in the request path is scrubbed",
+      "event": {
+        "message": "boom",
+        "request": {
+          "method": "GET",
+          "path": "/reset/eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJVadQssw5c",
+          "status": 404
+        }
+      },
+      "expected": {
+        "message": "boom",
+        "request": { "method": "GET", "path": "/reset/[scrubbed]", "status": 404 }
+      }
+    },
+    {
+      "name": "frames and tags are left alone; only message and request are scrubbed",
+      "event": {
+        "message": "TypeError: x is undefined",
+        "exceptionType": "TypeError",
+        "release": "deadbeefdeadbeefdeadbeefdeadbeef",
+        "environment": "production",
+        "frames": [
+          { "file": "src/checkout.ts", "function": "processOrder", "line": 42, "inApp": true }
+        ]
+      },
+      "expected": {
+        "message": "TypeError: x is undefined",
+        "exceptionType": "TypeError",
+        "release": "deadbeefdeadbeefdeadbeefdeadbeef",
+        "environment": "production",
+        "frames": [
+          { "file": "src/checkout.ts", "function": "processOrder", "line": 42, "inApp": true }
+        ]
+      }
+    },
+    {
+      "name": "multiple secrets in one message are each scrubbed",
+      "event": { "message": "retry with sk_live_abcdefgh12345678 after 4242424242424242 failed" },
+      "expected": { "message": "retry with [scrubbed] after [scrubbed] failed" }
+    },
+    {
+      "name": "breadcrumb messages pass the pattern scrub (Phase 3)",
+      "event": {
+        "message": "boom",
+        "breadcrumbs": [
+          { "timestamp": null, "category": "http", "message": "POST /charge with sk_live_abcdefgh12345678", "data": null }
+        ]
+      },
+      "expected": {
+        "message": "boom",
+        "breadcrumbs": [
+          { "timestamp": null, "category": "http", "message": "POST /charge with [scrubbed]", "data": null }
+        ]
+      }
+    },
+    {
+      "name": "breadcrumb data values pass the pattern scrub; benign values stay",
+      "event": {
+        "message": "boom",
+        "breadcrumbs": [
+          {
+            "timestamp": null,
+            "category": "payment",
+            "message": "charging card",
+            "data": { "card": "4242424242424242", "order": "ord-42" }
+          }
+        ]
+      },
+      "expected": {
+        "message": "boom",
+        "breadcrumbs": [
+          {
+            "timestamp": null,
+            "category": "payment",
+            "message": "charging card",
+            "data": { "card": "[scrubbed]", "order": "ord-42" }
+          }
+        ]
+      }
+    },
+    {
+      "name": "frame source-context lines pass the pattern scrub; file, function and line stay",
+      "event": {
+        "message": "boom",
+        "frames": [
+          {
+            "file": "app/billing.py",
+            "function": "charge",
+            "line": 12,
+            "inApp": true,
+            "contextLine": "API_KEY = \"sk_live_abcdefgh12345678\"",
+            "preContext": ["import stripe"],
+            "postContext": ["charge(API_KEY)"]
+          }
+        ]
+      },
+      "expected": {
+        "message": "boom",
+        "frames": [
+          {
+            "file": "app/billing.py",
+            "function": "charge",
+            "line": 12,
+            "inApp": true,
+            "contextLine": "API_KEY = \"[scrubbed]\"",
+            "preContext": ["import stripe"],
+            "postContext": ["charge(API_KEY)"]
+          }
+        ]
+      }
+    }
+  ]
+}
