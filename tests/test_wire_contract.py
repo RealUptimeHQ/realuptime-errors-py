@@ -21,11 +21,11 @@ ALLOWED_IMPORTS = {
     "sys",
     "threading",
     "time",
-    "traceback",
     "urllib.error",
     "urllib.request",
     "datetime",
     "linecache",
+    "platform",
 }
 
 
@@ -54,7 +54,20 @@ class TestWireContractMirror(unittest.TestCase):
         self.assertEqual(realuptime_errors.MAX_BREADCRUMBS_PER_EVENT, 20)
         self.assertEqual(realuptime_errors.MAX_BREADCRUMB_DATA_ENTRIES, 10)
 
+    def test_v2_caps_match_the_js_sdk(self):
+        # REA-182, mirrored from packages/errors-js/types.ts and pinned
+        # there too. The server's copies live in
+        # packages/db/error-ingest.ts.
+        self.assertEqual(realuptime_errors.MAX_TAGS_PER_EVENT, 20)
+        self.assertEqual(realuptime_errors.MAX_CONTEXT_ENTRIES, 20)
+        self.assertEqual(realuptime_errors.MAX_CONTEXT_KEY_LENGTH, 64)
+        self.assertEqual(realuptime_errors.MAX_LOCAL_VARS_PER_FRAME, 20)
+        self.assertEqual(realuptime_errors.MAX_LOCAL_VAR_LENGTH, 256)
+
     def test_event_field_names(self):
+        # Built with no state, so no v2 scope exists to emit: this is the
+        # v1 key set, and it must stay exactly this. The v2 keys appearing
+        # only when something set them is covered in test_context_v2.py.
         event = realuptime_errors._build_event("m", "TypeError", None)
         self.assertEqual(
             sorted(event.keys()),

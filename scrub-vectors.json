@@ -1,6 +1,6 @@
 {
-  "comment": "Shared PII-scrub test vectors for the Errors SDKs and the server-side second net (docs/errors-plan.md, 'The SDKs: two languages, one contract'). Consumed by packages/errors-js/scrub.test.ts, packages/errors-py/tests/test_scrub.py, and packages/db/error-scrub.test.ts. All three implementations must produce byte-identical output for every vector; a semantic change here is a wire-contract change and needs all three updated in one PR. The server's second net applies the PATTERN rules only: header removal and allowFields are client-side duties (a header that reaches the server was either never in the removal set or was deliberately opted back in, and the server cannot tell which). Vectors where the server's output therefore differs carry expectedServer; absent it, the server expects `expected`.",
-  "version": 1,
+  "comment": "Shared PII-scrub test vectors for the Errors SDKs and the server-side second net (docs/errors-plan.md, 'The SDKs: two languages, one contract'). Consumed by packages/errors-js/scrub.test.ts, packages/errors-py/tests/test_scrub.py, and packages/db/error-scrub.test.ts. All three implementations must produce byte-identical output for every vector; a semantic change here is a wire-contract change and needs all three updated in one PR. The server's second net applies the PATTERN rules only: FIELD REMOVAL (removed headers, and v2's user.email / user.username) and allowFields are client-side duties -- a field that reaches the server was either never in the removal set or was deliberately opted back in, and the server cannot tell which. Vectors where the server's output therefore differs carry expectedServer; absent it, the server expects `expected`. Vectors named 'v2 ...' cover the REA-182 additions (identity, tags, custom context, device metadata, matched route, frame locals); every v1 vector above them is unchanged, which is itself part of the additive guarantee.",
+  "version": 2,
   "vectors": [
     {
       "name": "card number, plain, Luhn-valid",
@@ -341,6 +341,165 @@
       "expected": {
         "message": "checkout failed",
         "request": { "method": "POST", "path": "/checkout/session/8842", "status": 500 }
+      }
+    },
+
+    {
+      "name": "v2 identity: user.id rides as-is, email and username are removed by default (REA-182)",
+      "event": {
+        "message": "checkout failed",
+        "user": { "id": "acct_9182", "email": "alice@example.com", "username": "alice" }
+      },
+      "expected": {
+        "message": "checkout failed",
+        "user": { "id": "acct_9182", "email": "[scrubbed]", "username": "[scrubbed]" }
+      },
+      "expectedServer": {
+        "message": "checkout failed",
+        "user": { "id": "acct_9182", "email": "alice@example.com", "username": "alice" }
+      }
+    },
+    {
+      "name": "v2 identity: allowFields opts user.email back in by exact dotted name; username stays removed",
+      "allowFields": ["user.email"],
+      "event": {
+        "message": "checkout failed",
+        "user": { "id": "acct_9182", "email": "alice@example.com", "username": "alice" }
+      },
+      "expected": {
+        "message": "checkout failed",
+        "user": { "id": "acct_9182", "email": "alice@example.com", "username": "[scrubbed]" }
+      },
+      "expectedServer": {
+        "message": "checkout failed",
+        "user": { "id": "acct_9182", "email": "alice@example.com", "username": "alice" }
+      }
+    },
+    {
+      "name": "v2 identity: an opted-in user.email still passes the pattern scrub",
+      "allowFields": ["user.email"],
+      "event": {
+        "message": "boom",
+        "user": { "email": "alice+eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJVadQssw5c@example.com" }
+      },
+      "expected": {
+        "message": "boom",
+        "user": { "email": "alice+[scrubbed]@example.com" }
+      }
+    },
+    {
+      "name": "v2 identity: a token-shaped user.id is pattern-scrubbed like any other string",
+      "event": { "message": "boom", "user": { "id": "sk_live_abcdefgh12345678" } },
+      "expected": { "message": "boom", "user": { "id": "[scrubbed]" } }
+    },
+    {
+      "name": "v2 tags: values pass the pattern scrub, keys and benign values stay",
+      "event": {
+        "message": "charge failed",
+        "tags": { "tenant": "acme", "plan": "growth", "card": "4242424242424242" }
+      },
+      "expected": {
+        "message": "charge failed",
+        "tags": { "tenant": "acme", "plan": "growth", "card": "[scrubbed]" }
+      }
+    },
+    {
+      "name": "v2 custom context: values pass the pattern scrub",
+      "event": {
+        "message": "boom",
+        "context": {
+          "cartTotal": "49.99",
+          "sessionToken": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJVadQssw5c"
+        }
+      },
+      "expected": {
+        "message": "boom",
+        "context": { "cartTotal": "49.99", "sessionToken": "[scrubbed]" }
+      }
+    },
+    {
+      "name": "v2 device: runtime metadata is left intact (it carries no customer data)",
+      "event": {
+        "message": "boom",
+        "device": { "runtime": "node", "runtimeVersion": "22.4.0", "platform": "linux", "arch": "arm64" }
+      },
+      "expected": {
+        "message": "boom",
+        "device": { "runtime": "node", "runtimeVersion": "22.4.0", "platform": "linux", "arch": "arm64" }
+      }
+    },
+    {
+      "name": "v2 route: the matched route template is pattern-scrubbed like the path",
+      "event": {
+        "message": "boom",
+        "request": {
+          "method": "POST",
+          "path": "/webhooks/sk_live_abcdefgh12345678/deliver",
+          "route": "/webhooks/sk_live_abcdefgh12345678/deliver",
+          "status": 500
+        }
+      },
+      "expected": {
+        "message": "boom",
+        "request": {
+          "method": "POST",
+          "path": "/webhooks/[scrubbed]/deliver",
+          "route": "/webhooks/[scrubbed]/deliver",
+          "status": 500
+        }
+      }
+    },
+    {
+      "name": "v2 route: a parameterised route template survives untouched (it is the grouping key)",
+      "event": {
+        "message": "boom",
+        "request": { "method": "GET", "path": "/orders/8842", "route": "/orders/:id", "status": 500 }
+      },
+      "expected": {
+        "message": "boom",
+        "request": { "method": "GET", "path": "/orders/8842", "route": "/orders/:id", "status": 500 }
+      }
+    },
+    {
+      "name": "v2 local variables: captured frame locals pass the pattern scrub",
+      "event": {
+        "message": "boom",
+        "frames": [
+          {
+            "file": "app/billing.py",
+            "function": "charge",
+            "line": 12,
+            "inApp": true,
+            "vars": { "attempt": "3", "card": "4242424242424242", "api_key": "sk_live_abcdefgh12345678" }
+          }
+        ]
+      },
+      "expected": {
+        "message": "boom",
+        "frames": [
+          {
+            "file": "app/billing.py",
+            "function": "charge",
+            "line": 12,
+            "inApp": true,
+            "vars": { "attempt": "3", "card": "[scrubbed]", "api_key": "[scrubbed]" }
+          }
+        ]
+      }
+    },
+    {
+      "name": "v2 adapter forwarding: a framework tag and a route ride together, neither leaking headers (REA-182)",
+      "event": {
+        "message": "TypeError: undefined is not a function",
+        "tags": { "framework": "express" },
+        "request": { "method": "GET", "path": "/orders/8842", "route": "/orders/:id", "status": 500 },
+        "device": { "runtime": "node", "runtimeVersion": "22.4.0" }
+      },
+      "expected": {
+        "message": "TypeError: undefined is not a function",
+        "tags": { "framework": "express" },
+        "request": { "method": "GET", "path": "/orders/8842", "route": "/orders/:id", "status": 500 },
+        "device": { "runtime": "node", "runtimeVersion": "22.4.0" }
       }
     }
   ]

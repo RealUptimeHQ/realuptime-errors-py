@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "realuptime-errors"
-version = "0.2.0"
+version = "0.4.0"
 description = "Zero-dependency error tracking SDK for Python (WSGI/ASGI), part of RealUptime Errors."
 readme = "README.md"
 requires-python = ">=3.8"

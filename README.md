@@ -12,7 +12,7 @@ they merge upstream.
 
 ## Install
 
-Installs straight from GitHub today. npm and PyPI packages are coming; this note disappears the day they ship.
+Installs straight from GitHub today. npm, PyPI, RubyGems, and Packagist packages are coming; this note disappears the day they ship.
 
 ```bash
 pip install "git+https://github.com/RealUptimeHQ/realuptime-errors-py"
@@ -69,7 +69,7 @@ ASGI: `app = realuptime_errors.AsgiMiddleware(app)`
 
 ## Version
 
-This mirror tracks SDK_VERSION `0.2.0` in `realuptime_errors.py`, the
+This mirror tracks SDK_VERSION `0.4.0` in `realuptime_errors.py`, the
 string every event actually carries on the wire.
 
 ## License
