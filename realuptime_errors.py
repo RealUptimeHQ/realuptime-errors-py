@@ -1,5 +1,5 @@
 """realuptime-errors: minimal Python error tracking SDK, Phase 1
-(docs/errors-plan.md, Linear REA-57).
+(the internal-docs repo's errors-plan.md, Linear REA-57).
 
 One wire contract with the JS SDK (packages/errors-js/types.ts); the shared
 scrub vectors (packages/errors-js/scrub-vectors.json) pin both SDKs and the
@@ -74,11 +74,53 @@ _REMOVED_HEADERS = {"authorization", "proxy-authorization", "cookie", "set-cooki
 # many users hit this" answerable, and it is not contact data.
 _REMOVED_USER_FIELDS = ("user.email", "user.username")
 
+_URL_CREDS_RE = re.compile(r"\b([a-zA-Z][a-zA-Z0-9+.-]*)://[^\s/@]+:[^\s/@]+@")
 _JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\b")
-_PREFIXED_KEY_RE = re.compile(r"\b(?:sk|pk|rk|ghp|gho|ghs|xox[a-z]|rua|rue|ru_live)_[A-Za-z0-9_-]{8,}")
+_PREFIXED_KEY_RE = re.compile(r"\b(?:sk|pk|rk|ghp|gho|ghs|xox[a-z]|rua|rue|ru_live|whsec)_[A-Za-z0-9_-]{8,}")
+_AWS_KEY_RE = re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")
 _CARD_RE = re.compile(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)")
 _HEX_RE = re.compile(r"\b[0-9a-fA-F]{32,}\b")
 _BASE64_RE = re.compile(r"(?<![A-Za-z0-9+_=-])[A-Za-z0-9+_-]{40,}={0,2}")
+
+# Key-name denylist (REA-474): see packages/errors-js/scrub.ts's module doc
+# for the full rationale. Matched against whole camelCase/snake_case
+# segments (and contiguous joins of them) so "tokenizer" and "authentic"
+# never match "token" / "auth".
+_KEY_DENYLIST = frozenset(
+    {
+        "password",
+        "passwd",
+        "secret",
+        "token",
+        "apikey",
+        "auth",
+        "authorization",
+        "credential",
+        "credentials",
+        "privatekey",
+        "accesskey",
+        "session",
+    }
+)
+
+_CAMEL_BOUNDARY_RE = re.compile(r"([a-z0-9])([A-Z])")
+_SEPARATOR_RE = re.compile(r"[^a-zA-Z0-9]+")
+
+
+def _key_segments(key: str) -> "list[str]":
+    spaced = _CAMEL_BOUNDARY_RE.sub(r"\1_\2", key)
+    return [s.lower() for s in _SEPARATOR_RE.split(spaced) if s]
+
+
+def is_key_denylisted(key: str) -> bool:
+    segments = _key_segments(key)
+    for i in range(len(segments)):
+        joined = ""
+        for j in range(i, len(segments)):
+            joined += segments[j]
+            if joined in _KEY_DENYLIST:
+                return True
+    return False
 
 
 def _luhn_valid(digits: str) -> bool:
@@ -103,10 +145,16 @@ def _scrub_card(match: "re.Match[str]") -> str:
     return run
 
 
+def _scrub_url_creds(match: "re.Match[str]") -> str:
+    return "%s://%s@" % (match.group(1), SCRUBBED)
+
+
 def scrub_string(value: str) -> str:
-    """The five pattern rules, in the shared order (see scrub-vectors.json)."""
-    out = _JWT_RE.sub(SCRUBBED, value)
+    """The pattern rules, in the shared order (see scrub-vectors.json)."""
+    out = _URL_CREDS_RE.sub(_scrub_url_creds, value)
+    out = _JWT_RE.sub(SCRUBBED, out)
     out = _PREFIXED_KEY_RE.sub(SCRUBBED, out)
+    out = _AWS_KEY_RE.sub(SCRUBBED, out)
     out = _CARD_RE.sub(_scrub_card, out)
     out = _HEX_RE.sub(SCRUBBED, out)
     out = _BASE64_RE.sub(SCRUBBED, out)
@@ -120,19 +168,23 @@ def _scrub_breadcrumb(crumb: dict) -> dict:
     data = out.get("data")
     if isinstance(data, dict):
         out["data"] = {
-            name: scrub_string(value) if isinstance(value, str) else value for name, value in data.items()
+            name: (SCRUBBED if is_key_denylisted(name) else scrub_string(value)) if isinstance(value, str) else value
+            for name, value in data.items()
         }
     return out
 
 
 def _scrub_string_map(value):
     """v2: a flat string map (tags, custom context, device, frame locals).
-    Values pass the pattern rules; KEYS are left alone -- a key is a label
-    the integrator chose, and scrubbing it would make an issue's tag filter
-    depend on whether the value beside it looked like a card number."""
+    Values pass the pattern rules unless the KEY itself is denylisted by
+    name (REA-474: password/secret/token/... -- see is_key_denylisted),
+    in which case the value is replaced whole regardless of shape."""
     if not isinstance(value, dict):
         return value
-    return {name: scrub_string(entry) if isinstance(entry, str) else entry for name, entry in value.items()}
+    return {
+        name: (SCRUBBED if is_key_denylisted(name) else scrub_string(entry)) if isinstance(entry, str) else entry
+        for name, entry in value.items()
+    }
 
 
 def _scrub_user(user, allowed):
@@ -205,7 +257,7 @@ def scrub_event(event: dict, allow_fields: "list[str] | None" = None) -> dict:
             scrubbed_headers = {}
             for name, value in headers.items():
                 lower = name.lower()
-                if lower in _REMOVED_HEADERS and lower not in allowed:
+                if (lower in _REMOVED_HEADERS or is_key_denylisted(lower)) and lower not in allowed:
                     scrubbed_headers[name] = SCRUBBED
                 else:
                     scrubbed_headers[name] = scrub_string(value) if isinstance(value, str) else value

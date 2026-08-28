@@ -1,5 +1,5 @@
 {
-  "comment": "Shared PII-scrub test vectors for the Errors SDKs and the server-side second net (docs/errors-plan.md, 'The SDKs: two languages, one contract'). Consumed by packages/errors-js/scrub.test.ts, packages/errors-py/tests/test_scrub.py, and packages/db/error-scrub.test.ts. All three implementations must produce byte-identical output for every vector; a semantic change here is a wire-contract change and needs all three updated in one PR. The server's second net applies the PATTERN rules only: FIELD REMOVAL (removed headers, and v2's user.email / user.username) and allowFields are client-side duties -- a field that reaches the server was either never in the removal set or was deliberately opted back in, and the server cannot tell which. Vectors where the server's output therefore differs carry expectedServer; absent it, the server expects `expected`. Vectors named 'v2 ...' cover the REA-182 additions (identity, tags, custom context, device metadata, matched route, frame locals); every v1 vector above them is unchanged, which is itself part of the additive guarantee.",
+  "comment": "Shared PII-scrub test vectors for the Errors SDKs and the server-side second net (the internal-docs repo's errors-plan.md, 'The SDKs: two languages, one contract'). Consumed by packages/errors-js/scrub.test.ts, packages/errors-py/tests/test_scrub.py, and packages/db/error-scrub.test.ts. All three implementations must produce byte-identical output for every vector; a semantic change here is a wire-contract change and needs all three updated in one PR. The server's second net applies the PATTERN rules only: FIELD REMOVAL (removed headers, and v2's user.email / user.username) and allowFields are client-side duties -- a field that reaches the server was either never in the removal set or was deliberately opted back in, and the server cannot tell which. Vectors where the server's output therefore differs carry expectedServer; absent it, the server expects `expected`. Vectors named 'v2 ...' cover the REA-182 additions (identity, tags, custom context, device metadata, matched route, frame locals); every v1 vector above them is unchanged, which is itself part of the additive guarantee.",
   "version": 2,
   "vectors": [
     {
@@ -501,6 +501,190 @@
         "request": { "method": "GET", "path": "/orders/8842", "route": "/orders/:id", "status": 500 },
         "device": { "runtime": "node", "runtimeVersion": "22.4.0" }
       }
+    },
+
+    {
+      "name": "REA-474 key-name denylist: context password key redacted regardless of value shape",
+      "event": {
+        "message": "boom",
+        "context": { "db_password": "hunter2", "cartTotal": "49.99" }
+      },
+      "expected": {
+        "message": "boom",
+        "context": { "db_password": "[scrubbed]", "cartTotal": "49.99" }
+      }
+    },
+    {
+      "name": "REA-474 key-name denylist: tag named secret redacted regardless of value shape",
+      "event": {
+        "message": "boom",
+        "tags": { "client_secret": "not-shaped-like-anything", "plan": "growth" }
+      },
+      "expected": {
+        "message": "boom",
+        "tags": { "client_secret": "[scrubbed]", "plan": "growth" }
+      }
+    },
+    {
+      "name": "REA-474 key-name denylist: camelCase apiKey in frame vars redacted",
+      "event": {
+        "message": "boom",
+        "frames": [
+          {
+            "file": "app/billing.py",
+            "function": "charge",
+            "line": 12,
+            "inApp": true,
+            "vars": { "apiKey": "not-shaped-like-anything", "attempt": "3" }
+          }
+        ]
+      },
+      "expected": {
+        "message": "boom",
+        "frames": [
+          {
+            "file": "app/billing.py",
+            "function": "charge",
+            "line": 12,
+            "inApp": true,
+            "vars": { "apiKey": "[scrubbed]", "attempt": "3" }
+          }
+        ]
+      }
+    },
+    {
+      "name": "REA-474 key-name denylist: private_key and access_key in custom context redacted (device is a closed shape in some SDKs, so this uses context instead)",
+      "event": {
+        "message": "boom",
+        "context": { "private_key": "not-shaped", "access_key": "not-shaped", "cartTotal": "49.99" }
+      },
+      "expected": {
+        "message": "boom",
+        "context": { "private_key": "[scrubbed]", "access_key": "[scrubbed]", "cartTotal": "49.99" }
+      }
+    },
+    {
+      "name": "REA-474 key-name denylist: breadcrumb data session key redacted",
+      "event": {
+        "message": "boom",
+        "breadcrumbs": [
+          {
+            "timestamp": null,
+            "category": "auth",
+            "message": "login attempt",
+            "data": { "session": "not-shaped-like-anything", "outcome": "ok" }
+          }
+        ]
+      },
+      "expected": {
+        "message": "boom",
+        "breadcrumbs": [
+          {
+            "timestamp": null,
+            "category": "auth",
+            "message": "login attempt",
+            "data": { "session": "[scrubbed]", "outcome": "ok" }
+          }
+        ]
+      }
+    },
+    {
+      "name": "REA-474 key-name denylist: near-miss key names are NOT redacted (tokenizer, authentic)",
+      "event": {
+        "message": "boom",
+        "context": { "tokenizer": "gpt2", "authentic": "yes" }
+      },
+      "expected": {
+        "message": "boom",
+        "context": { "tokenizer": "gpt2", "authentic": "yes" }
+      }
+    },
+    {
+      "name": "REA-474 key-name denylist: a header named by key alone (x-auth-token) is removed client-side; the server has no name-based removal so it stays (value fails the pattern rules)",
+      "event": {
+        "message": "boom",
+        "request": {
+          "method": "GET",
+          "path": "/v1/charge",
+          "status": 500,
+          "headers": { "x-auth-token": "not-shaped-like-anything", "x-request-id": "req-1" }
+        }
+      },
+      "expected": {
+        "message": "boom",
+        "request": {
+          "method": "GET",
+          "path": "/v1/charge",
+          "status": 500,
+          "headers": { "x-auth-token": "[scrubbed]", "x-request-id": "req-1" }
+        }
+      },
+      "expectedServer": {
+        "message": "boom",
+        "request": {
+          "method": "GET",
+          "path": "/v1/charge",
+          "status": 500,
+          "headers": { "x-auth-token": "not-shaped-like-anything", "x-request-id": "req-1" }
+        }
+      }
+    },
+    {
+      "name": "REA-474 key-name denylist: allowFields opts a denylisted header name back in, same as an explicitly removed header",
+      "allowFields": ["x-auth-token"],
+      "event": {
+        "message": "boom",
+        "request": {
+          "method": "GET",
+          "path": "/v1/charge",
+          "status": 500,
+          "headers": { "x-auth-token": "not-shaped-like-anything" }
+        }
+      },
+      "expected": {
+        "message": "boom",
+        "request": {
+          "method": "GET",
+          "path": "/v1/charge",
+          "status": 500,
+          "headers": { "x-auth-token": "not-shaped-like-anything" }
+        }
+      }
+    },
+    {
+      "name": "REA-474 value shape: AWS access key id (AKIA) is scrubbed",
+      "event": { "message": "leaked creds AKIAIOSFODNN7EXAMPLE in log" },
+      "expected": { "message": "leaked creds [scrubbed] in log" }
+    },
+    {
+      "name": "REA-474 value shape: AWS temporary access key id (ASIA) is scrubbed",
+      "event": { "message": "leaked creds ASIAIOSFODNN7EXAMPLE in log" },
+      "expected": { "message": "leaked creds [scrubbed] in log" }
+    },
+    {
+      "name": "REA-474 value shape: a short AKIA-prefixed run stays (not the 16-char shape)",
+      "event": { "message": "AKIA123 is not a real key" },
+      "expected": { "message": "AKIA123 is not a real key" }
+    },
+    {
+      "name": "REA-474 value shape: Stripe webhook signing secret (whsec_) is scrubbed",
+      "event": { "message": "signature check failed for whsec_abcdefgh12345678" },
+      "expected": { "message": "signature check failed for [scrubbed]" }
+    },
+    {
+      "name": "REA-474 value shape: a postgres connection string's userinfo is scrubbed; host stays readable",
+      "event": { "message": "connect failed: postgres://dbuser:hunter2@db.internal:5432/app" },
+      "expected": { "message": "connect failed: postgres://[scrubbed]@db.internal:5432/app" }
+    },
+    {
+      "name": "REA-474 value shape: an https URL with userinfo credentials is scrubbed; host and path stay",
+      "event": { "message": "fetch failed for https://svc:s3cr3t-pass@api.example.com/v1/orders" },
+      "expected": { "message": "fetch failed for https://[scrubbed]@api.example.com/v1/orders" }
+    },
+    {
+      "name": "REA-474 value shape: a plain URL with no userinfo is left alone",
+      "event": { "message": "fetch failed for https://api.example.com/v1/orders" },
+      "expected": { "message": "fetch failed for https://api.example.com/v1/orders" }
     }
   ]
 }
