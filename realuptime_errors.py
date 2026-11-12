@@ -1,8 +1,8 @@
 """realuptime-errors: minimal Python error tracking SDK, Phase 1
 (the internal-docs repo's errors-plan.md, Linear REA-57).
 
-One wire contract with the JS SDK (packages/errors-js/types.ts); the shared
-scrub vectors (packages/errors-js/scrub-vectors.json) pin both SDKs and the
+One wire contract with the JS SDK (errors-js/types.ts); the shared
+scrub vectors (errors-js/scrub-vectors.json) pin both SDKs and the
 server's second net to byte-identical scrubbing. Python 3 stdlib only, no
 dependencies, same rule as deploy/vps: this file runs inside customer
 processes and its dependency graph must be auditable at a glance.
@@ -14,7 +14,7 @@ that crashes the app it watches is worse than none.
 Usage:
 
     import realuptime_errors
-    realuptime_errors.init(dsn="https://realuptime.io/api/errors/v1/ingest/rue_...",
+    realuptime_errors.init(dsn="https://ingest.realuptime.io/api/errors/v1/ingest/rue_...",
                            release="v2.4.1", environment="production")
     ...
     realuptime_errors.capture_exception(exc)
@@ -25,6 +25,7 @@ ASGI:  app = realuptime_errors.AsgiMiddleware(app)
 
 from __future__ import annotations
 
+import atexit
 import json
 import linecache
 import platform
@@ -33,12 +34,13 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 SDK_NAME = "realuptime-errors-py"
-SDK_VERSION = "0.4.0"
+SDK_VERSION = "0.4.1"  # x-release-please-version
 
-# Mirrored from packages/errors-js/types.ts and pinned by
+# Mirrored from errors-js/types.ts and pinned by
 # tests/test_wire_contract.py.
 MAX_EVENTS_PER_BATCH = 50
 MAX_MESSAGE_LENGTH = 4000
@@ -48,7 +50,7 @@ MAX_BREADCRUMBS_PER_EVENT = 20
 MAX_BREADCRUMB_DATA_ENTRIES = 10
 BUFFER_MAX = 200
 
-# v2 caps (REA-182), mirrored from packages/errors-js/types.ts.
+# v2 caps (REA-182), mirrored from errors-js/types.ts.
 MAX_TAGS_PER_EVENT = 20
 MAX_CONTEXT_ENTRIES = 20
 MAX_CONTEXT_KEY_LENGTH = 64
@@ -74,7 +76,7 @@ _REMOVED_HEADERS = {"authorization", "proxy-authorization", "cookie", "set-cooki
 # many users hit this" answerable, and it is not contact data.
 _REMOVED_USER_FIELDS = ("user.email", "user.username")
 
-_URL_CREDS_RE = re.compile(r"\b([a-zA-Z][a-zA-Z0-9+.-]*)://[^\s/@]+:[^\s/@]+@")
+_URL_CREDS_RE = re.compile(r"\b([a-zA-Z][a-zA-Z0-9+.-]{0,31})://[^\s/@:]+:[^\s/@]+@")
 _JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\b")
 _PREFIXED_KEY_RE = re.compile(r"\b(?:sk|pk|rk|ghp|gho|ghs|xox[a-z]|rua|rue|ru_live|whsec)_[A-Za-z0-9_-]{8,}")
 _AWS_KEY_RE = re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")
@@ -82,7 +84,7 @@ _CARD_RE = re.compile(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)")
 _HEX_RE = re.compile(r"\b[0-9a-fA-F]{32,}\b")
 _BASE64_RE = re.compile(r"(?<![A-Za-z0-9+_=-])[A-Za-z0-9+_-]{40,}={0,2}")
 
-# Key-name denylist (REA-474): see packages/errors-js/scrub.ts's module doc
+# Key-name denylist (REA-474): see errors-js/scrub.ts's module doc
 # for the full rationale. Matched against whole camelCase/snake_case
 # segments (and contiguous joins of them) so "tokenizer" and "authentic"
 # never match "token" / "auth".
@@ -268,8 +270,8 @@ def scrub_event(event: dict, allow_fields: "list[str] | None" = None) -> dict:
 
 # ---------------------------------------------------------------------------
 # REA-264: customer-defined ADDITIONAL scrub rules. Mirrors
-# packages/db/error-scrub-rules.ts and packages/errors-js/custom-scrub.ts;
-# packages/errors-js/custom-scrub-vectors.json pins the three to identical
+# packages/db/error-scrub-rules.ts and errors-js/custom-scrub.ts;
+# errors-js/custom-scrub-vectors.json pins the three to identical
 # output (tests/test_custom_scrub.py). Applied AFTER scrub_event, never
 # instead of it: nothing here can relax a default. Rules arrive from the
 # project's settings via GET /api/errors/v1/scrub-rules/<key> at init, or
@@ -281,6 +283,15 @@ MAX_CUSTOM_SCRUB_RULES = 50
 MAX_CUSTOM_SCRUB_PATTERN_LENGTH = 200
 SCRUB_RULES_TIMEOUT_S = 5.0
 _EMPTY_CUSTOM_SCRUB = {"names": frozenset(), "globs": (), "values": (), "count": 0}
+
+# The single background thread that fetches the project's rules, and the two
+# bounded waits that retire it. _close() uses the short one (it is called
+# between tests, where a leftover thread compounds); the interpreter's exit
+# hook uses the longer one, capped at a second, because a host process must
+# never pay a visible shutdown delay for a best-effort fetch.
+SCRUB_FETCH_THREAD_NAME = "realuptime-errors-scrub-rules"
+SCRUB_FETCH_JOIN_S = 0.2
+SCRUB_FETCH_EXIT_JOIN_S = min(SCRUB_RULES_TIMEOUT_S, 1.0)
 
 
 def _glob_to_regex(glob: str) -> "re.Pattern[str]":
@@ -576,7 +587,7 @@ def _detect_device() -> "dict | None":
 
 class _Transport:
     """Batched, buffered, backed-off delivery. Mirrors
-    packages/errors-js/client.ts: over_quota pauses until the reset instant,
+    errors-js/client.ts: over_quota pauses until the reset instant,
     key_revoked disables for the process lifetime, transient failures back
     off exponentially, and client-side drops ride the next successful batch
     as droppedClient so they reach the product's visible drop counters."""
@@ -754,6 +765,35 @@ _state: "_State | None" = None
 _hook_installed = False
 _previous_excepthook = None
 
+# The ingest route's path shape: /api/errors/v1/ingest/<key>, an optional
+# trailing slash, nothing else. Mirrors errors-js/index.ts's
+# INGEST_PATH_RE and the marker checks in scrub_rules_url_for above.
+_INGEST_PATH_RE = re.compile(r"^/api/errors/v1/ingest/[^/?#]+/?$")
+
+
+def _is_ingest_url(dsn) -> bool:
+    """REA-575: a dsn must be the full ingest URL the server hands out at
+    project creation, not the bare rue_... key alone. Before this check,
+    init() accepted any non-empty string and handed it straight to the
+    transport as the fetch endpoint: a bare key is not a fetchable URL, so
+    every send failed silently inside the transport's own never-raise
+    handling, forever, with no signal anywhere."""
+    try:
+        parsed = urllib.parse.urlsplit(dsn)
+    except Exception:
+        return False
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return False
+    return bool(_INGEST_PATH_RE.match(parsed.path))
+
+
+def is_enabled() -> bool:
+    """Whether error reporting is actually on: init() was called with a dsn
+    that passed _is_ingest_url. A host process should log this once at
+    startup rather than assume that wiring init() into the code means
+    events are flowing."""
+    return _state is not None
+
 
 def init(
     dsn,
@@ -791,14 +831,27 @@ def init(
                               invalid one is skipped. Nothing relaxes a
                               default.
       fetch_scrub_rules       fetch the project's additional rules (set in
-                              realuptime Errors settings) once, in a daemon
-                              thread, and apply them client-side too. Default
-                              True. Fails open to the defaults; the server
-                              applies the same rules at ingest regardless."""
+                              realuptime Errors settings) once, on the SDK's
+                              single background thread, and apply them
+                              client-side too. Default True. Fails open to
+                              the defaults; the server applies the same rules
+                              at ingest regardless. The thread retires as
+                              soon as the fetch lands, calling init() again
+                              re-uses it rather than starting a second one,
+                              and an interpreter-exit hook stops and joins it
+                              for at most SCRUB_FETCH_EXIT_JOIN_S so process
+                              shutdown is never delayed by more than that."""
     global _state
     try:
+        log_fn = _log or (lambda message: print(message, file=sys.stderr))
         if not dsn or not isinstance(dsn, str):
-            print("[realuptime-errors] init called without a dsn; error reporting is disabled.", file=sys.stderr)
+            log_fn("[realuptime-errors] init called without a dsn; error reporting is disabled.")
+            return
+        if not _is_ingest_url(dsn):
+            log_fn(
+                "[realuptime-errors] dsn must be the full ingest URL, got a bare key (or a malformed URL); "
+                "expected https://<host>/api/errors/v1/ingest/<key>. Error reporting is disabled."
+            )
             return
         transport = _Transport(dsn, opener=_opener, now=_now, log=_log)
         _state = _State(
@@ -816,15 +869,104 @@ def init(
         if capture_unhandled:
             _install_excepthook()
         if fetch_scrub_rules:
-            thread = threading.Thread(
-                target=_fetch_scrub_rules, args=(_state, _rules_fetcher or _http_get), daemon=True
-            )
-            thread.start()
+            _start_scrub_fetch(_state, _rules_fetcher or _http_get)
     except Exception as failure:
         try:
             print("[realuptime-errors] init failed: %r" % (failure,), file=sys.stderr)
         except Exception:
             pass
+
+
+# ---------------------------------------------------------------------------
+# Shutdown discipline: the scrub-rules fetch runs on ONE thread per process,
+# and that thread is stopped and joined on _close() and at interpreter exit.
+#
+# Before this, every init() started its own daemon thread and _close() simply
+# dropped the state, so a process that called init() repeatedly (a test suite
+# is the obvious one, but so is any host that re-inits per worker or per
+# config reload) finalized the interpreter with a pile of daemon threads
+# parked inside urllib/ssl/getaddrinfo. CPython 3.11 kills daemon threads at
+# an arbitrary point during finalization; killing several that are inside a
+# C call segfaults the process AFTER the useful work is done. The RealUptime
+# gate hit exactly that: 83 tests pass, then exit 139.
+#
+# Why the thread stays a DAEMON thread plus an atexit join, rather than
+# becoming non-daemon: a non-daemon thread is joined by threading._shutdown
+# with NO timeout, and this thread's worst case is not bounded by
+# SCRUB_RULES_TIMEOUT_S. urlopen's timeout covers connect and read but not
+# name resolution, and getaddrinfo against a dead resolver can block for tens
+# of seconds. Making it non-daemon would trade a rare crash for a routine
+# multi-second hang on every host process exit, so the thread stays a daemon
+# and the atexit hook joins it for at most SCRUB_FETCH_EXIT_JOIN_S. Worst
+# case that adds one second to process exit; the common case (the fetch has
+# already finished and the thread has retired) adds nothing at all.
+# ---------------------------------------------------------------------------
+
+_scrub_fetch_lock = threading.Lock()
+_scrub_fetch_thread: "threading.Thread | None" = None
+_scrub_fetch_stop = threading.Event()
+# At most one job waits here: a second init() replaces the pending fetch
+# rather than queueing behind it, because only the newest state matters.
+_scrub_fetch_job: "list" = []
+_scrub_fetch_atexit_registered = False
+
+
+def _start_scrub_fetch(for_state, fetcher) -> None:
+    """Hands the fetch to the process's one fetch thread, starting it if it
+    is not already running. Never raises."""
+    global _scrub_fetch_thread, _scrub_fetch_atexit_registered
+    try:
+        with _scrub_fetch_lock:
+            _scrub_fetch_stop.clear()
+            del _scrub_fetch_job[:]
+            _scrub_fetch_job.append((for_state, fetcher))
+            # A fetch already in flight picks this up when it returns. Never
+            # stack a second thread on top of a stuck one.
+            if _scrub_fetch_thread is not None and _scrub_fetch_thread.is_alive():
+                return
+            if not _scrub_fetch_atexit_registered:
+                atexit.register(_stop_scrub_fetch, SCRUB_FETCH_EXIT_JOIN_S)
+                _scrub_fetch_atexit_registered = True
+            _scrub_fetch_thread = threading.Thread(
+                target=_scrub_fetch_worker, name=SCRUB_FETCH_THREAD_NAME, daemon=True
+            )
+            _scrub_fetch_thread.start()
+    except Exception:
+        # init() never raises, and reporting still works on the defaults.
+        pass
+
+
+def _scrub_fetch_worker() -> None:
+    """Drains the pending fetch, then retires. Nothing idles: a process that
+    inits once ends up with no SDK thread at all once the rules land."""
+    global _scrub_fetch_thread
+    while True:
+        with _scrub_fetch_lock:
+            if _scrub_fetch_stop.is_set() or not _scrub_fetch_job:
+                if _scrub_fetch_thread is threading.current_thread():
+                    _scrub_fetch_thread = None
+                return
+            for_state, fetcher = _scrub_fetch_job.pop()
+            del _scrub_fetch_job[:]
+        _fetch_scrub_rules(for_state, fetcher)
+
+
+def _stop_scrub_fetch(join_timeout_s: float) -> None:
+    """Tells the fetch thread to drop its result and waits a bounded time for
+    it to end. A thread still inside a socket call cannot be interrupted, so
+    this is a bounded wait, not a guarantee; what it does guarantee is that
+    the result is discarded and that no second thread is ever started behind
+    this one. Never raises."""
+    try:
+        with _scrub_fetch_lock:
+            del _scrub_fetch_job[:]
+            _scrub_fetch_stop.set()
+            thread = _scrub_fetch_thread
+        # Joined OUTSIDE the lock: the worker needs it to retire.
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(join_timeout_s)
+    except Exception:
+        pass
 
 
 def _fetch_scrub_rules(for_state, fetcher):
@@ -841,6 +983,10 @@ def _fetch_scrub_rules(for_state, fetcher):
         parsed = json.loads(body.decode("utf-8") if isinstance(body, bytes) else body)
         rules = parsed.get("rules") if isinstance(parsed, dict) else None
         if not isinstance(rules, list):
+            return
+        # _close() or the exit hook ran while this was in flight; the result
+        # belongs to a process that is done with us.
+        if _scrub_fetch_stop.is_set():
             return
         # init may have been called again while this was in flight; only the
         # state this fetch was started for is updated.
@@ -1151,8 +1297,11 @@ def flush():
 
 
 def _close():
-    """Test seam: drops state and restores the excepthook."""
+    """Test seam: drops state, stops the scrub-rules fetch, and restores the
+    excepthook. The fetch join is what keeps repeated init()/_close() cycles
+    from leaving live threads behind; see the shutdown note above."""
     global _state, _hook_installed
+    _stop_scrub_fetch(SCRUB_FETCH_JOIN_S)
     _state = None
     if _hook_installed and _previous_excepthook is not None:
         sys.excepthook = _previous_excepthook

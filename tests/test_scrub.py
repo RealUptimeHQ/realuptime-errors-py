@@ -1,6 +1,6 @@
 """Drives the SHARED scrub vectors through the Python SDK.
 
-The vectors file (packages/errors-js/scrub-vectors.json) is the single
+The vectors file (errors-js/scrub-vectors.json) is the single
 source of truth for scrub semantics across the JS SDK, this SDK, and the
 server's second net; this suite must never grow expectations of its own.
 """
@@ -63,3 +63,16 @@ class TestScrubVectors(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestScrubLinearTime(unittest.TestCase):
+    """Error messages often carry user input, and this runs in the
+    customer's own process: a pattern that backtracks on it stalls their app."""
+
+    def test_hostile_scheme_and_colon_run_is_fast(self):
+        import time
+
+        hostile = "a." * 300 + "://" + ":" * 2000
+        started = time.perf_counter()
+        realuptime_errors.scrub_string(hostile)
+        self.assertLess(time.perf_counter() - started, 0.25)

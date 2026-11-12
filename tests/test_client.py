@@ -1,4 +1,4 @@
-"""Transport and public-API behavior, mirroring packages/errors-js/client.test.ts."""
+"""Transport and public-API behavior, mirroring errors-js/client.test.ts."""
 
 import json
 import os
@@ -114,7 +114,7 @@ class TestPublicApiNeverRaises(unittest.TestCase):
             raise RuntimeError("opener exploded")
 
         realuptime_errors.init(
-            dsn="https://x/i/rue_a", capture_unhandled=False, _opener=exploding_opener, _log=lambda m: None
+            dsn="https://x/api/errors/v1/ingest/rue_a", capture_unhandled=False, _opener=exploding_opener, _log=lambda m: None
         )
         try:
             raise ValueError("boom")
@@ -129,7 +129,7 @@ class TestPublicApiNeverRaises(unittest.TestCase):
             captured["batch"] = json.loads(body)
             return 200, ok_body()
 
-        realuptime_errors.init(dsn="https://x/i/rue_a", capture_unhandled=False, _opener=opener, _log=lambda m: None)
+        realuptime_errors.init(dsn="https://x/api/errors/v1/ingest/rue_a", capture_unhandled=False, _opener=opener, _log=lambda m: None)
 
         def inner():
             raise ValueError("deep")
@@ -157,7 +157,7 @@ class TestBreadcrumbs(unittest.TestCase):
             captured["batch"] = json.loads(body)
             return 200, ok_body()
 
-        realuptime_errors.init(dsn="https://x/i/rue_a", capture_unhandled=False, _opener=opener, _log=lambda m: None)
+        realuptime_errors.init(dsn="https://x/api/errors/v1/ingest/rue_a", capture_unhandled=False, _opener=opener, _log=lambda m: None)
         return captured
 
     def test_trail_rides_next_event_with_eviction_count(self):
@@ -195,7 +195,7 @@ class TestSourceContext(unittest.TestCase):
             captured["batch"] = json.loads(body)
             return 200, ok_body()
 
-        realuptime_errors.init(dsn="https://x/i/rue_a", capture_unhandled=False, _opener=opener, _log=lambda m: None)
+        realuptime_errors.init(dsn="https://x/api/errors/v1/ingest/rue_a", capture_unhandled=False, _opener=opener, _log=lambda m: None)
 
         def deep():
             raise ValueError("ctx")

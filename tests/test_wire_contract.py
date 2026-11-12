@@ -16,12 +16,14 @@ SOURCE = os.path.join(os.path.dirname(__file__), "..", "realuptime_errors.py")
 # processes; its dependency graph must be auditable at a glance.
 ALLOWED_IMPORTS = {
     "__future__",
+    "atexit",
     "json",
     "re",
     "sys",
     "threading",
     "time",
     "urllib.error",
+    "urllib.parse",
     "urllib.request",
     "datetime",
     "linecache",
@@ -45,7 +47,7 @@ class TestDependencyHygiene(unittest.TestCase):
 
 class TestWireContractMirror(unittest.TestCase):
     def test_limits_match_the_js_sdk(self):
-        # Mirrored from packages/errors-js/types.ts, pinned on both sides.
+        # Mirrored from errors-js/types.ts, pinned on both sides.
         self.assertEqual(realuptime_errors.MAX_EVENTS_PER_BATCH, 50)
         self.assertEqual(realuptime_errors.MAX_MESSAGE_LENGTH, 4000)
         self.assertEqual(realuptime_errors.MAX_FRAMES_PER_EVENT, 50)
@@ -55,7 +57,7 @@ class TestWireContractMirror(unittest.TestCase):
         self.assertEqual(realuptime_errors.MAX_BREADCRUMB_DATA_ENTRIES, 10)
 
     def test_v2_caps_match_the_js_sdk(self):
-        # REA-182, mirrored from packages/errors-js/types.ts and pinned
+        # REA-182, mirrored from errors-js/types.ts and pinned
         # there too. The server's copies live in
         # packages/db/error-ingest.ts.
         self.assertEqual(realuptime_errors.MAX_TAGS_PER_EVENT, 20)

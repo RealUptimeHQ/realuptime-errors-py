@@ -18,7 +18,7 @@ class TestMiddleware(unittest.TestCase):
             self.batches.append(json.loads(body))
             return 200, json.dumps({"accepted": 1, "droppedOverQuota": 0, "overQuota": False, "quota": {"used": 1, "limit": 10000, "resetsAt": "2026-09-01T00:00:00.000Z"}}).encode()
 
-        realuptime_errors.init(dsn="https://x/i/rue_a", capture_unhandled=False, _opener=opener, _log=lambda m: None)
+        realuptime_errors.init(dsn="https://x/api/errors/v1/ingest/rue_a", capture_unhandled=False, _opener=opener, _log=lambda m: None)
 
     def tearDown(self):
         realuptime_errors._close()

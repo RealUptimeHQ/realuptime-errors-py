@@ -4,7 +4,7 @@ Zero-dependency error tracking SDK for Python (WSGI/ASGI middleware plus
 manual capture): part of
 [RealUptime Errors](https://realuptime.io/error-tracking).
 
-This is a **mirror**. It is published from `packages/errors-py` in the
+This is a **mirror**. It is published from `errors-py` in the
 [realuptime monorepo](https://github.com/RealUptimeHQ/realuptime) by
 `scripts/publish-sdk-mirrors.mjs` and is not edited directly; open issues
 and PRs against this repo, but expect source changes to land here after
@@ -74,7 +74,7 @@ ASGI: `app = realuptime_errors.AsgiMiddleware(app)`
 
 ## Version
 
-This mirror tracks SDK_VERSION `0.4.0` in `realuptime_errors.py`, the
+This mirror tracks SDK_VERSION `0.4.1` in `realuptime_errors.py`, the
 string every event actually carries on the wire.
 
 ## License
