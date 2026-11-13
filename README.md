@@ -77,6 +77,14 @@ ASGI: `app = realuptime_errors.AsgiMiddleware(app)`
 This mirror tracks SDK_VERSION `0.4.1` in `realuptime_errors.py`, the
 string every event actually carries on the wire.
 
+## Running the tests
+
+The suite is in `tests/` and needs only Python 3 (no test dependencies):
+
+```bash
+python3 -m unittest discover -s tests
+```
+
 ## License
 
 MIT, see [LICENSE](./LICENSE).

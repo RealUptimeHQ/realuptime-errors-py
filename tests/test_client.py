@@ -85,7 +85,7 @@ class TestTransport(unittest.TestCase):
         transport.enqueue(event("a"))
         transport.enqueue(event("b"))
         self.assertEqual(len(opener.batches), 1)
-        self.assertEqual(len([l for l in logs if "revoked" in l]), 1)
+        self.assertEqual(len([line for line in logs if "revoked" in line]), 1)
 
     def test_network_failure_backs_off_and_retries_same_event(self):
         opener = RecordingOpener([OSError("refused"), (200, ok_body())])

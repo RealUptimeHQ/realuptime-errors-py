@@ -1,0 +1,8 @@
+# The Python SDK's linter configuration (ruff). The gate runs it through
+# scripts/lint-sdks.mjs. Line length is left to the code's own wrapping; the
+# rules are pyflakes, pycodestyle and flake8-bugbear.
+target-version = "py39"
+
+[lint]
+select = ["E", "F", "W", "B"]
+ignore = ["E501"]
