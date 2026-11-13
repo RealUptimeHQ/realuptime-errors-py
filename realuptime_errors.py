@@ -83,6 +83,10 @@ _AWS_KEY_RE = re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")
 _CARD_RE = re.compile(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)")
 _HEX_RE = re.compile(r"\b[0-9a-fA-F]{32,}\b")
 _BASE64_RE = re.compile(r"(?<![A-Za-z0-9+_=-])[A-Za-z0-9+_-]{40,}={0,2}")
+# name=value pairs (REA-1260); the value class spells out JavaScript's \s so
+# all five SDKs and the server end a value at the same characters.
+_JS_SPACE = "\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+_KEY_VALUE_RE = re.compile(r"([A-Za-z0-9_.\[\]-]{1,64})=([^&#;,\"'<>" + _JS_SPACE + r"]+)")
 
 # Key-name denylist (REA-474): see errors-js/scrub.ts's module doc
 # for the full rationale. Matched against whole camelCase/snake_case
@@ -102,6 +106,14 @@ _KEY_DENYLIST = frozenset(
         "privatekey",
         "accesskey",
         "session",
+        # REA-1260: names that carry credentials in query strings and form text.
+        "pw",
+        "pwd",
+        "passphrase",
+        "sig",
+        "signature",
+        "sid",
+        "otp",
     }
 )
 
@@ -160,7 +172,13 @@ def scrub_string(value: str) -> str:
     out = _CARD_RE.sub(_scrub_card, out)
     out = _HEX_RE.sub(SCRUBBED, out)
     out = _BASE64_RE.sub(SCRUBBED, out)
+    out = _KEY_VALUE_RE.sub(_scrub_key_value, out)
     return out
+
+
+def _scrub_key_value(match: "re.Match[str]") -> str:
+    key = match.group(1)
+    return "%s=%s" % (key, SCRUBBED) if is_key_denylisted(key) else match.group(0)
 
 
 def _scrub_breadcrumb(crumb: dict) -> dict:

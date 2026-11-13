@@ -118,7 +118,7 @@
           "method": "POST",
           "path": "/login",
           "status": 500,
-          "headers": { "Cookie": "sid=abc", "Set-Cookie": "sid=def", "Proxy-Authorization": "Basic xyz" }
+          "headers": { "Cookie": "sid=[scrubbed]", "Set-Cookie": "sid=[scrubbed]", "Proxy-Authorization": "Basic xyz" }
         }
       }
     },
@@ -685,6 +685,71 @@
       "name": "REA-474 value shape: a plain URL with no userinfo is left alone",
       "event": { "message": "fetch failed for https://api.example.com/v1/orders" },
       "expected": { "message": "fetch failed for https://api.example.com/v1/orders" }
+    },
+    {
+      "name": "REA-1260 name=value: a reset token in a URL query string is scrubbed; the other parameter stays",
+      "event": { "message": "fetch failed /reset?token=Ab3dE5gH7jK9mN1pQ3sT5vW7yZ9b&x=1" },
+      "expected": { "message": "fetch failed /reset?token=[scrubbed]&x=1" }
+    },
+    {
+      "name": "REA-1260 name=value: a short password in free text is scrubbed",
+      "event": { "message": "login rejected password=placeholder1 for ana" },
+      "expected": { "message": "login rejected password=[scrubbed] for ana" }
+    },
+    {
+      "name": "REA-1260 name=value: request.path query parameters named like credentials are scrubbed",
+      "event": { "message": "x", "request": { "method": "GET", "path": "/login?user=ana&api_key=placeholder12345&page=2" } },
+      "expected": { "message": "x", "request": { "method": "GET", "path": "/login?user=ana&api_key=[scrubbed]&page=2" } }
+    },
+    {
+      "name": "REA-1260 name=value: names that only look close (author, page, retry) stay",
+      "event": { "message": "retry=3 page=2 author=ana tokens_left=9" },
+      "expected": { "message": "retry=3 page=2 author=ana tokens_left=9" }
+    },
+    {
+      "name": "REA-1260 name=value: prose with spaces around = is not a pair",
+      "event": { "message": "Unexpected token = in JSON; secret = not set" },
+      "expected": { "message": "Unexpected token = in JSON; secret = not set" }
+    },
+    {
+      "name": "REA-1260 name=value: an already-scrubbed value comes out unchanged",
+      "event": { "message": "api_key=[scrubbed]&password=[scrubbed]" },
+      "expected": { "message": "api_key=[scrubbed]&password=[scrubbed]" }
+    },
+    {
+      "name": "REA-1260 name=value: bracketed form field names are matched by their parts",
+      "event": { "message": "POST user[password]=placeholder1&user[name]=ana" },
+      "expected": { "message": "POST user[password]=[scrubbed]&user[name]=ana" }
+    },
+    {
+      "name": "REA-1260 name=value: camelCase and snake_case names, values ending at a delimiter",
+      "event": { "message": "clientSecret=placeholder9;sessionId=abc123,access_token=\"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.c2lnbmF0dXJlLXBsYWNlaG9sZGVy\" done" },
+      "expected": { "message": "clientSecret=[scrubbed];sessionId=[scrubbed],access_token=\"[scrubbed]\" done" }
+    },
+    {
+      "name": "REA-1260 name=value: a JWT after a credential name is one scrubbed value",
+      "event": { "message": "access_token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.c2lnbmF0dXJlLXBsYWNlaG9sZGVy#frag" },
+      "expected": { "message": "access_token=[scrubbed]#frag" }
+    },
+    {
+      "name": "REA-1260 name=value: breadcrumb messages, tag and context values get the rule too",
+      "event": { "message": "x", "breadcrumbs": [{ "timestamp": null, "category": null, "message": "GET /cb?code=1&state=s&auth=placeholder7", "data": { "url": "/a?secret=placeholder8" } }], "tags": { "next": "/home?token=placeholder5" }, "context": { "query": "passwd=placeholder6&q=shoes" } },
+      "expected": { "message": "x", "breadcrumbs": [{ "timestamp": null, "category": null, "message": "GET /cb?code=1&state=s&auth=[scrubbed]", "data": { "url": "/a?secret=[scrubbed]" } }], "tags": { "next": "/home?token=[scrubbed]" }, "context": { "query": "passwd=[scrubbed]&q=shoes" } }
+    },
+    {
+      "name": "REA-1260 name=value: pw, pwd, passphrase, sig, signature, sid and otp names are credential names",
+      "event": { "message": "GET /s3/a.png?X-Amz-Signature=placeholder1&sig=placeholder2&sid=placeholder3&pw=placeholder4&pwd=x&passphrase=y&otp=123456&sidebar=open" },
+      "expected": { "message": "GET /s3/a.png?X-Amz-Signature=[scrubbed]&sig=[scrubbed]&sid=[scrubbed]&pw=[scrubbed]&pwd=[scrubbed]&passphrase=[scrubbed]&otp=[scrubbed]&sidebar=open" }
+    },
+    {
+      "name": "REA-1260 name=value: whole names only, so inside=, consider=, signal= and topwd= stay",
+      "event": { "message": "inside=1&consider=yes&signal=strong&topwd=x&sidecar=up&passwords_reset=3" },
+      "expected": { "message": "inside=1&consider=yes&signal=strong&topwd=x&sidecar=up&passwords_reset=3" }
+    },
+    {
+      "name": "REA-1260 name=value: names match in any case",
+      "event": { "message": "PASSWORD=placeholder1&Sid=placeholder2&API_KEY=placeholder3" },
+      "expected": { "message": "PASSWORD=[scrubbed]&Sid=[scrubbed]&API_KEY=[scrubbed]" }
     }
   ]
 }
