@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 
 SDK_NAME = "realuptime-errors-py"
-SDK_VERSION = "0.4.1"  # x-release-please-version
+SDK_VERSION = "0.4.2"  # x-release-please-version
 
 # Mirrored from errors-js/types.ts and pinned by
 # tests/test_wire_contract.py.

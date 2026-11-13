@@ -74,7 +74,7 @@ ASGI: `app = realuptime_errors.AsgiMiddleware(app)`
 
 ## Version
 
-This mirror tracks SDK_VERSION `0.4.1` in `realuptime_errors.py`, the
+This mirror tracks SDK_VERSION `0.4.2` in `realuptime_errors.py`, the
 string every event actually carries on the wire.
 
 ## Running the tests
